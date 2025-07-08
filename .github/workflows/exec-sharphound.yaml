@@ -1,0 +1,83 @@
+name: Exec SharpHound
+
+on:
+#   push:
+#     branches:
+#       - main
+  workflow_dispatch:
+    inputs:
+      hostlabels:
+        description: 'The label of the host to execute'
+        type: string
+        required: true
+
+jobs:
+  build-dotnet-tools:
+    runs-on: windows-2022
+    
+    steps:
+      - name: Check dotnet version
+        run: |
+          dotnet --version
+      
+      # - name: List dotnet sdk
+      #   run: |
+      #     dotnet --list-sdks
+
+      - name: mkdir publish
+        run: |
+          mkdir ./publish
+          
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build SharpHound
+        run: |
+          # Set the repository variable to the git repository URL. e.g. https://github.com/BloodHoundAD/SharpHound.git
+          git clone ${{ vars.SHARPHOUND_GIT_REPO_URL }}
+          cd SharpHound
+          dotnet restore .
+          dotnet build --configuration=Release
+          #copy ./bin/Release/net472/SharpHound.exe ../publish/SharpHound.exe
+          copy ./bin/Release/net*/SharpHound.exe ../publish
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharphound-files
+          path: ./publish
+    
+  exec-sharphound:
+    needs: build-dotnet-tools
+    runs-on: ${{ inputs.hostlabels }}
+
+    steps:
+      - name: Request User Approval
+        uses: ./.github/actions/utils/require-user-approval
+
+      # If you prefer notification only instead of approval:
+      #- name: User Notification
+      #  uses: ./.github/actions/utils/user-notification
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: sharphound-files
+
+      - name: dir ./
+        run: |
+          dir ./
+
+      - name: Exec SharpHound
+        run: |
+          ./SharpHound.exe -c All --zipfilename sharphound_all.zip
+
+      - name: dir ./
+        run: |
+          dir ./
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharphound-result
+          path: ./*_sharphound_all.zip

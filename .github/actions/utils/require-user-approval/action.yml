@@ -1,0 +1,33 @@
+name: "Require User Approval"
+description: "Require explicit user approval before proceeding with the workflow. Displays a confirmation prompt and stops execution if declined."
+runs:
+  using: "composite"
+  steps:
+    - name: Request User Approval
+      shell: powershell
+      run: |
+        $repository_name = $env:GITHUB_REPOSITORY
+        $repository_id = $env:GITHUB_REPOSITORY_ID
+        $repository_owner = $env:GITHUB_REPOSITORY_OWNER
+        $repository_owner_id = $env:GITHUB_REPOSITORY_OWNER_ID
+        $workflow_name = $env:GITHUB_WORKFLOW
+        $workflow_sha = $env:GITHUB_WORKFLOW_SHA
+        $actor = $env:GITHUB_ACTOR
+        $actor_id = $env:GITHUB_ACTOR_ID
+        $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+        $message = "Do you approve running this GitHub Actions workflow?`n`n" +
+                   "Repository: $repository_name ($repository_id)`n" +
+                   "Owner: $repository_owner ($repository_owner_id)`n" +
+                   "Workflow: $workflow_name (SHA: $workflow_sha)`n" +
+                   "Triggered by: $actor ($actor_id)`n" +
+                   "Executed at: $time"
+        
+        $result = (New-Object -ComObject WScript.Shell).Popup($message, 0, "Confirmation Required", 4 + 48 + 256)
+
+        if ($result -eq 6) {
+          Write-Host "User selected 'Yes'. Continuing execution."
+        } else {
+          Write-Host "User selected 'No' or closed the dialog. Terminating the workflow."
+          exit 1
+        }

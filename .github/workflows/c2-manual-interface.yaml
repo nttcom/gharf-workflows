@@ -1,0 +1,98 @@
+name: C2 manual interface
+on:
+  workflow_dispatch:
+    inputs:
+      hostlabels:
+        description: 'Host label to execute'
+        type: string
+        required: true
+      command_type:
+        description: 'Command type'
+        type: choice
+        required: true
+        options:
+          - 'shell'
+          - 'javascript'
+          - 'download'
+          - 'upload'
+          - 'custom-module'
+#      shell_type:
+#        type: choice
+#        required: false
+#        options:
+#          - 'auto'
+#          - 'bash'
+#          - 'pwsh'
+#          - 'python'
+#          - 'sh'
+#          - 'cmd'
+#          - 'powershell'
+#        default: 'auto'
+      sourcecode:
+        type: string
+        description: 'Shell script(PowerShell/Bash) or JavaScript source code to execute (Required if command type is shell/javascript, otherwise blank)'
+        required: false
+        default: ''
+      filepath:
+        type: string
+        description: 'Filepath to download (Required if command type is download, otherwise blank)'
+        required: false
+      module_name:
+        type: choice
+        description: 'Custom module workflow name (Required if command type is custom-module, otherwise blank'
+        required: false
+        # Ideally, this should be fetched automatically, but it seems difficult
+        options:
+          - ''
+          - 'exec-rubeus'
+          - 'exec-sharphound'
+          #- 'exec-mimikatz'
+        default: ''
+
+jobs:
+  c2front:
+    runs-on: ubuntu-latest
+    env:
+      C2_WORKFLOW_NAME: c2.yaml
+      C2_WORKFLOW_BRANCH_NAME: c2-workflow
+    steps:
+      - name: Generate run-name(shell, javascript)
+        if: ${{ inputs.command_type == 'shell' || inputs.command_type == 'javascript' }}
+        run: |
+          SOURCE_CODE='${{ inputs.sourcecode }}'
+          echo 'RUN_NAME=c2-${{ inputs.command_type }}-'"${SOURCE_CODE:0:20}" >> $GITHUB_ENV
+      - name: Generate run-name(download)
+        if: ${{ inputs.command_type == 'download'}}
+        run: |
+          echo 'RUN_NAME=c2-${{ inputs.command_type }}-${{ inputs.filepath }}' >> $GITHUB_ENV
+      - name: Generate run-name(upload)
+        if: ${{ inputs.command_type == 'upload'}}
+        run: |
+          echo 'RUN_NAME=c2-${{ inputs.command_type }}' >> $GITHUB_ENV
+      - name: Generate run-name(custom-module)
+        if: ${{ inputs.command_type == 'custom-module'}}
+        run: |
+          echo 'RUN_NAME=c2-${{ inputs.module_name }}' >> $GITHUB_ENV
+          
+      - name: Call c2 workflow
+        run: |
+          REPO=$(echo ${{ github.repository }} | sed -e "s#.*/##")
+          OWNER=${{ github.repository_owner }}
+
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/$OWNER/$REPO/actions/workflows/${{ env.C2_WORKFLOW_NAME }}/dispatches \
+            -d '{
+              "ref": "${{ env.C2_WORKFLOW_BRANCH_NAME }}",
+              "inputs": {
+                  "hostlabels": "${{ inputs.hostlabels }}",
+                  "command_type": "${{ inputs.command_type }}",
+                  "sourcecode": "${{ inputs.sourcecode }}",
+                  "filepath": "${{ inputs.filepath }}",
+                  "run_name": "${{ env.RUN_NAME }}",
+                  "module_name": "${{ inputs.module_name }}"
+              }
+            }'
+      
